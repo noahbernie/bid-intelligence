@@ -10,3 +10,7 @@ dist/
 build/
 raw_data/
 *.json.bak
+# Scraper output — don't commit raw data
+scrapers/**/raw_output.json
+scrapers/**/screenshot.png
+scrapers/**/page.html

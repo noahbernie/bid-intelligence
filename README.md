@@ -8,8 +8,8 @@ Scrapes public construction/infrastructure bid opportunities across the US and s
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium
-cp .env.example .env  # then fill in your Supabase credentials
+python -m playwright install chromium
+cp .env.example .env  # fill in your Supabase credentials
 ```
 
 ## Run the scraper
@@ -18,11 +18,20 @@ cp .env.example .env  # then fill in your Supabase credentials
 python scrapers/planetbids/scraper.py
 ```
 
+Output is saved to `scrapers/planetbids/raw_output.json`.
+
+To scrape all bids (not just the first 100), set `TARGET_BIDS = None` in `scraper.py`.
+
+## How it works
+
+PlanetBids portals are Ember.js SPAs backed by a JSON API at `api-external.prod.planetbids.com`.
+The scraper loads the portal in a headless browser and captures API responses as they fire
+during natural infinite-scroll pagination.
+
 ## Structure
 
 ```
-scrapers/planetbids/   # PlanetBids portal scraper
-db/                    # Supabase client + upsert logic
-models/                # Pydantic schema models
-validation/            # Validation pipeline
-```# bid-intelligence
+scrapers/planetbids/   # PlanetBids portal scraper (infinite scroll, API intercept)
+db/                    # Supabase client + upsert logic (coming next)
+models/                # Pydantic schema models (coming next)
+```
