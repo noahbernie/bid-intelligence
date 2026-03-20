@@ -25,4 +25,4 @@ scrapers/planetbids/   # PlanetBids portal scraper
 db/                    # Supabase client + upsert logic
 models/                # Pydantic schema models
 validation/            # Validation pipeline
-```
+```# bid-intelligence
