@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from db.client import get_client
-from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award, ScrapeLog
+from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award, ScrapeLog, Source
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +26,22 @@ def _dump(model) -> dict:
 
 def _get_id(response) -> str:
     return response.data[0]["id"]
+
+
+# ---------------------------------------------------------------------------
+# Source
+# ---------------------------------------------------------------------------
+
+def upsert_source(source: Source) -> str:
+    """Upsert by name. Returns the source UUID."""
+    db = get_client()
+    data = _dump(source)
+    res = (
+        db.table("sources")
+        .upsert(data, on_conflict="name")
+        .execute()
+    )
+    return _get_id(res)
 
 
 # ---------------------------------------------------------------------------

@@ -44,16 +44,25 @@ from db.upsert import (
 PORTAL_ID = 17950
 TEST_BID_ID = 139043
 
-# Maps our capture key → URL fragment to match (handles both path and query-param styles)
+# Maps our capture key → URL fragment to match
 WATCHED_FRAGMENTS = {
-    "agencies":         "/papi/agencies/",
-    "bid-details":      "/papi/bid-details/",
-    "bid-files":        "/papi/bid-downloadable-files",
-    "bid-plan-holders": "/papi/bid-plan-holders",
-    "bid-addenda":      "/papi/bid-addenda",
-    "bid-results":      "/papi/bid-results",
-    "bid-line-items":   "/papi/bid-line-items",
+    "agencies":             "/papi/agencies/",
+    "bid-details":          "/papi/bid-details/",
+    "bid-files":            "/papi/bid-downloadable-files",
+    "bid-prospective-bidders": "/papi/bid-prospective-bidders",
+    "bid-addenda":          "/papi/bid-addenda",
+    "bid-results":          "/papi/bid-results",
+    "bid-line-items":       "/papi/bid-line-items",
 }
+
+# Tab endpoints that require a live session but work via page.request after page load
+# Format: (capture_key, path_template) — {bid_id} will be substituted
+TAB_API_PATHS = [
+    ("bid-prospective-bidders", "/papi/bid-prospective-bidders?bid_id={bid_id}"),
+    ("bid-line-items",          "/papi/bid-line-items?bid_id={bid_id}"),
+    ("bid-addenda",             "/papi/bid-addenda?bid_id={bid_id}"),
+    ("bid-results",             "/papi/bid-results?bid_id={bid_id}"),
+]
 
 # Ember SPA tab routes (appended to the bo-detail URL)
 TAB_ROUTES = [
@@ -71,11 +80,15 @@ TAB_ROUTES = [
 
 async def fetch_bid_data(page: Page, portal_id: int, bid_id: int) -> dict:
     """
-    Load the bid detail page, then use history.pushState to navigate
-    within the running Ember SPA (avoids full page reloads that reset session).
-    Intercepts all papi/ responses throughout.
+    Load the bid detail page, wait for the Ember app to fully render,
+    then click each tab to trigger its lazy-loaded API call.
     """
     captured: dict[str, dict] = {}
+    session_hdrs: dict[str, str] = {}
+
+    async def on_request(req):
+        if "/papi/bid-details/" in req.url and not session_hdrs:
+            session_hdrs.update(req.headers)
 
     async def on_response(response):
         if "api-external.prod.planetbids.com/papi/" not in response.url:
@@ -86,15 +99,34 @@ async def fetch_bid_data(page: Page, portal_id: int, bid_id: int) -> dict:
             if fragment in response.url:
                 try:
                     captured[key] = await response.json()
+                    print(f"    Captured: {key}")
                 except Exception:
                     pass
 
+    page.on("request", on_request)
     page.on("response", on_response)
 
     base = f"https://vendors.planetbids.com/portal/{portal_id}/bo/bo-detail/{bid_id}"
     await page.goto(base, wait_until="domcontentloaded", timeout=30000)
-    await page.wait_for_timeout(5000)
 
+    for _ in range(20):
+        if "bid-details" in captured:
+            break
+        await page.wait_for_timeout(500)
+
+    api_base = "https://api-external.prod.planetbids.com"
+    for key, path_tpl in TAB_API_PATHS:
+        url = f"{api_base}{path_tpl.format(bid_id=bid_id)}"
+        try:
+            resp = await page.request.get(url, headers=session_hdrs)
+            if resp.ok:
+                captured[key] = await resp.json()
+                count = len(captured[key].get("data", []))
+                print(f"    Captured: {key} ({count} records)")
+        except Exception as e:
+            print(f"    Warning {key}: {e}")
+
+    page.remove_listener("request", on_request)
     page.remove_listener("response", on_response)
 
     def first_obj(data: dict) -> dict:
@@ -112,7 +144,7 @@ async def fetch_bid_data(page: Page, portal_id: int, bid_id: int) -> dict:
         "detail":     first_obj(captured.get("bid-details", {})),
         "line_items": first_list(captured.get("bid-line-items", {})),
         "files":      first_list(captured.get("bid-files", {})),
-        "bidders":    first_list(captured.get("bid-plan-holders", {})),
+        "bidders":    first_list(captured.get("bid-prospective-bidders", {})),
         "addenda":    first_list(captured.get("bid-addenda", {})),
         "award":      first_list(captured.get("bid-results", {})),
     }
@@ -126,9 +158,15 @@ async def run_pipeline(portal_id: int, bid_id: int):
     print(f"\n=== PlanetBids Pipeline: portal={portal_id}, bid={bid_id} ===\n")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
         await context.route("**fonts.googleapis.com**", lambda r: r.abort())
         await context.route("**fonts.gstatic.com**", lambda r: r.abort())
