@@ -169,6 +169,29 @@ class Company(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Bid — a company's submission on a job (from prospective bidders list)
+# ---------------------------------------------------------------------------
+class Bid(BaseModel):
+    id: Optional[str] = None
+    job_id: str                                    # FK → jobs.id
+    company_id: str                                # FK → companies.id
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_title: Optional[str] = None
+    bidder_external_id: Optional[str] = None      # PlanetBids vendorId
+    total_bid_amount: Optional[float] = None
+    rank: Optional[int] = None
+    working_days_bid: Optional[int] = None
+    submitted_date: Optional[datetime] = None
+    pct_subcontracted: Optional[float] = None
+    subcontracted_dollar_amount: Optional[float] = None
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    last_modified: Optional[datetime] = None
+    scrape_log_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # Award — a bid that won (links job → winning company)
 # ---------------------------------------------------------------------------
 class Award(BaseModel):

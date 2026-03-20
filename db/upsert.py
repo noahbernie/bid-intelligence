@@ -7,10 +7,10 @@ Returns the row's UUID so callers can chain foreign keys.
 """
 
 from __future__ import annotations
-from typing import Optional
+from datetime import datetime
 
 from db.client import get_client
-from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award, ScrapeLog, Source
+from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award, Bid, ScrapeLog, Source
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +145,24 @@ def upsert_company(company: Company) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Bid
+# ---------------------------------------------------------------------------
+
+def upsert_bids(bids: list[Bid]) -> list[str]:
+    """Upsert a list of bid submissions. Returns list of UUIDs."""
+    if not bids:
+        return []
+    db = get_client()
+    rows = [_dump(b) for b in bids]
+    res = (
+        db.table("bids")
+        .upsert(rows, on_conflict="job_id,company_id")
+        .execute()
+    )
+    return [r["id"] for r in res.data]
+
+
+# ---------------------------------------------------------------------------
 # Award
 # ---------------------------------------------------------------------------
 
@@ -175,4 +193,8 @@ def create_scrape_log(log: ScrapeLog) -> str:
 def update_scrape_log(log_id: str, **fields) -> None:
     """Patch an existing scrape log (e.g. mark complete, update counts)."""
     db = get_client()
-    db.table("scrape_logs").update(fields).eq("id", log_id).execute()
+    serialized = {
+        k: v.isoformat() if isinstance(v, datetime) else v
+        for k, v in fields.items()
+    }
+    db.table("scrape_logs").update(serialized).eq("id", log_id).execute()

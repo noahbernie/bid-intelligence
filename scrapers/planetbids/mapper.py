@@ -13,7 +13,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award
+from models.schema import Agency, Job, JobDetails, JobLineItem, JobMedia, Company, Award, Bid
 
 PORTAL_URL_BASE = "https://vendors.planetbids.com/portal"
 BID_TYPE_MAP = {1: "Bid", 2: "RFI", 4: "RFP", 8: "RFQ", 16: "RFQual", 32: "RFO"}
@@ -132,18 +132,92 @@ def map_job_media(files_data: list, job_id: str) -> list[JobMedia]:
     return result
 
 
+# PlanetBids returns state as an integer ID; map to 2-letter abbreviation
+_STATE_ID_MAP = {
+    1: "AL", 2: "AK", 3: "AZ", 4: "AR", 5: "CA", 6: "CO", 7: "CT", 8: "DE",
+    9: "FL", 10: "GA", 11: "HI", 12: "ID", 13: "IL", 14: "IN", 15: "IA",
+    16: "KS", 17: "KY", 18: "LA", 19: "ME", 20: "MD", 21: "MA", 22: "MI",
+    23: "MN", 24: "MS", 25: "MO", 26: "MT", 27: "NE", 28: "NV", 29: "NH",
+    30: "NJ", 31: "NM", 32: "NY", 33: "NC", 34: "ND", 35: "OH", 36: "OK",
+    37: "OR", 38: "PA", 39: "RI", 40: "SC", 41: "SD", 42: "TN", 43: "TX",
+    44: "UT", 45: "VT", 46: "VA", 47: "WA", 48: "WV", 49: "WI", 50: "WY",
+    51: "DC", 52: "CA",  # 52 observed for CA in PlanetBids data
+}
+
+# PlanetBids prospective-bidder status integer → label
+_BIDDER_STATUS_MAP = {0: "plan_holder", 1: "bidder", 2: "bidder"}
+
+
 def map_companies_from_prospective_bidders(bidders_data: list) -> list[Company]:
     result = []
     for b in bidders_data:
         a = b.get("attributes", {})
         if not a.get("vendorName"):
             continue
+        state_raw = a.get("state")
+        state = _STATE_ID_MAP.get(state_raw) if isinstance(state_raw, int) else state_raw
         result.append(Company(
             name=a.get("vendorName", ""),
             email=a.get("vendorEmail"),
             phone=a.get("phone"),
             location_city=a.get("city"),
-            location_state=str(a.get("state", "")),
+            location_state=state,
+        ))
+    return result
+
+
+def map_bids_from_prospective_bidders(bidders_data: list, job_id: str, company_id_map: dict, source_url: str = "") -> list[Bid]:
+    """
+    Stores all prospective bidders as bid records.
+    Only includes entries whose status maps to 'bidder'.
+    company_id_map: {vendorName -> company_id} built after upserting companies.
+    """
+    result = []
+    for b in bidders_data:
+        a = b.get("attributes", {})
+        status_int = a.get("status")
+        status_label = _BIDDER_STATUS_MAP.get(status_int, "plan_holder")
+        if status_label != "bidder":
+            continue
+        vendor_name = a.get("vendorName")
+        company_id = company_id_map.get(vendor_name)
+        if not company_id:
+            continue
+        result.append(Bid(
+            job_id=job_id,
+            company_id=company_id,
+            contact_name=a.get("contactName"),
+            contact_email=a.get("vendorEmail"),
+            bidder_external_id=str(a["vendorId"]) if a.get("vendorId") else None,
+            source="planetbids",
+            source_url=source_url,
+        ))
+    return result
+
+
+def map_bids_from_results(results_data: list, job_id: str, company_id_map: dict, source_url: str = "") -> list[Bid]:
+    """Map bid-results entries (actual submitted bids with amounts/ranks) into Bid records."""
+    result = []
+    for r in results_data:
+        a = r.get("attributes", {})
+        vendor_name = a.get("vendorName")
+        company_id = company_id_map.get(vendor_name)
+        if not company_id:
+            continue
+        result.append(Bid(
+            job_id=job_id,
+            company_id=company_id,
+            contact_name=a.get("contactName"),
+            contact_email=a.get("vendorEmail"),
+            bidder_external_id=str(a["vendorId"]) if a.get("vendorId") else None,
+            total_bid_amount=a.get("amount"),
+            rank=a.get("rank"),
+            working_days_bid=a.get("workingDays"),
+            submitted_date=_parse_dt(a.get("submittedDate") or a.get("date")),
+            pct_subcontracted=a.get("pctSubcontracted"),
+            subcontracted_dollar_amount=a.get("subcontractedAmount"),
+            source="planetbids",
+            source_url=source_url,
         ))
     return result
 
